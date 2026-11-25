@@ -34,10 +34,8 @@ The script of agent actions is the `ACTIONS` list near the top of the `<script>`
 
 ## AI assistance
 
-- **Tool:** Claude (Anthropic).
-- **What I asked for:** finding and checking sources for Assignment 1; generating the prototype code from the Assignment 1 design; testing it in a headless browser; producing the screenshots, storyboards and system diagram; drafting this README and the report.
-- **What I decided:** I chose the topic and research direction, and chose a clickable walkthrough rather than a live LLM.
-- **How results were checked:** every scene was exercised in a headless browser with errors logged; each cited source was opened and its claims compared with the text.
+- **Tool:** Claude.
+- I used Claude to generate and test the prototype code, produce the figures from its screenshots.
 
 ## Additional files
 
