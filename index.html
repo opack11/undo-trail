@@ -60,6 +60,9 @@
   textarea { width: 100%; min-height: 110px; font: inherit; padding: 8px; border: 1px solid var(--line); border-radius: 6px; }
   .toast { background: var(--okbg); color: var(--ok); padding: 8px 12px; border-radius: 6px; margin-top: 10px; font-size: 14px; }
   .toast.grey { background: #f1f0ec; color: var(--muted); }
+  .step.related { outline: 3px solid var(--accent); }
+  .linkbtn { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; font-size: 14px; text-decoration: underline; }
+  .record { font-size: 14px; margin: 8px 0 0; padding-left: 20px; }
   .note { font-size: 13px; color: var(--muted); }
   @media (max-width: 560px) { .nav { flex-direction: column; gap: 8px; } }
 </style>
@@ -122,7 +125,9 @@ const state = {
   undone: new Set(),           // ids of actions the person has undone
   selected: new Set(),         // ids ticked in the labelled trace
   correctionSent: false,
-  logMessage: ""
+  logMessage: "",
+  ack: "",                    // acknowledgement shown right after an undo
+  highlight: null             // id of a step whose dependants are highlighted
 };
 
 const SCENES = ["1 Request", "2 Agent report", "3 Problem noticed", "4 Recover", "5 Outcome"];
@@ -148,7 +153,11 @@ function sceneReport() {
   return `<div class="panel">
     <div class="who">Agent → you, 9 minutes later</div>
     <div class="bubble agent">“Done. I archived 12 drafts, tidied file names, removed 1 duplicate and emailed the team.”</div>
-    <p class="note">A typical completion message: short, confident, and it hides the details.</p>
+    <p class="note">The message above is the agent's <em>claim</em>. Below is the <em>record</em> of what its tools actually did.</p>
+    <strong>Action record: 6 actions</strong>
+    <ol class="record">${ACTIONS.map(a => `<li>${a.title} ${chip(a.reversibility)}</li>`).join("")}</ol>
+    <p class="note">4 can be undone · 1 undoable for 30 days · 1 cannot be undone.
+      <button class="linkbtn" onclick="go(3)">Review and undo</button></p>
   </div>`;
 }
 
@@ -186,25 +195,30 @@ function viewLog() {
 function viewTrace() {
   const cards = ACTIONS.map(a => {
     const undone = state.undone.has(a.id);
+    const kids = ACTIONS.filter(b => b.dependsOn === a.id).map(b => b.id);
+    const related = state.highlight !== null && (a.dependsOn === state.highlight || a.id === state.highlight);
+    const relBtn = kids.length ? `<button class="linkbtn" onclick="toggleHighlight(${a.id})">${state.highlight === a.id ? "Hide" : "Show"} steps that relied on this (${kids.join(", ")})</button>` : "";
     const dep = a.dependsOn && byId(a.dependsOn).mistake
       ? `<div class="dep">Relies on step ${a.dependsOn}. If step ${a.dependsOn} was wrong, this may be wrong too.</div>` : "";
     const control = a.reversibility === "none"
       ? `<input type="checkbox" disabled title="Cannot be undone" aria-label="Cannot be undone">`
       : `<input type="checkbox" ${state.selected.has(a.id) ? "checked" : ""} ${undone ? "disabled" : ""}
            onchange="toggleSelect(${a.id})" aria-label="Select step ${a.id} to undo">`;
-    return `<div class="step ${undone ? 'undone' : ''}">
+    return `<div class="step ${undone ? 'undone' : ''} ${related ? 'related' : ''}">
       <div>${control}</div>
       <div>
-        <div class="title">${a.id}. ${a.title} ${undone ? "(undone)" : ""}</div>
+        <div class="title">${a.id}. ${a.title} ${undone ? "<span class=\"note\">— undone by you</span>" : ""}</div>
         <div>${chip(a.reversibility)}</div>
         <div class="conseq">${a.consequence}</div>
         ${dep}
+        ${relBtn}
         <details><summary>Why did the agent do this?</summary>${a.why}</details>
         ${a.reversibility === "none" ? correctionBox(a) : ""}
       </div>
     </div>`;
   }).join("");
   return `<p class="note">Tick the steps you want to undo, then preview before anything changes.</p>
+    ${state.ack ? `<div class="toast" role="status">${state.ack}</div>` : ""}
     ${cards}
     <div class="nav" style="justify-content:flex-start">
       <button class="primary" onclick="render(true)" ${state.selected.size ? "" : "disabled"}>Preview undo</button>
@@ -214,7 +228,7 @@ function viewTrace() {
 
 /* For an action that cannot be undone, the agent proposes a correction and the person decides. */
 function correctionBox(a) {
-  if (state.correctionSent) return `<div class="toast">Correction sent to the Q3 team. The original email still exists in their inboxes.</div>`;
+  if (state.correctionSent) return `<div class="toast">Correction sent by you to the Q3 team. The original email still exists in their inboxes.</div>`;
   const v3back = state.undone.has(4);
   const text = v3back
     ? "Hi all, correction to my earlier email: the latest budget is Q3_budget_v3.xlsx (restored). Please ignore v2_final for Thursday's review."
@@ -279,14 +293,21 @@ function toggleSelect(id) { state.selected.has(id) ? state.selected.delete(id) :
 
 function confirmUndo() {
   // Undoing the folder (1) also needs its contents (2) moved back first.
+  const done = [];
   state.selected.forEach(id => {
     if (id === 1 && !state.selected.has(2) && !state.undone.has(2)) return;
-    state.undone.add(id);
+    state.undone.add(id); done.push(id);
   });
+  // Immediate acknowledgement: what changed, and what still needs attention.
+  const open = [5, 6].filter(id => state.undone.has(4) && !state.undone.has(id) && !(id === 5 && state.correctionSent));
+  const steps = ids => (ids.length > 1 ? "steps " : "step ") + ids.join(" and ");
+  state.ack = `Undone: ${steps(done.sort())}.` +
+    (open.length ? ` Still affected by the mistake: ${steps(open)}.` : "");
   state.selected.clear(); window._preview = false; render();
 }
 
-function sendCorrection() { state.correctionSent = true; render(); }
+function sendCorrection() { state.correctionSent = true; state.ack = "Correction sent by you."; render(); }
+function toggleHighlight(id) { state.highlight = state.highlight === id ? null : id; render(); }
 
 // Standard log behaviour: undo goes backwards in time; the email is skipped quietly.
 function logUndoLast() {
